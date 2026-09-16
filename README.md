@@ -70,6 +70,9 @@ reconstruct the pseudo-code, write the driver, and set up CI. All conclusions
 were cross-checked against the binary (URB function codes, control-transfer
 parameters, byte-level magic values).
 
+This project is promoted and tested in the [LINUX DO](https://linux.do)
+community — thanks to the 佬友 for testing and feedback. 💙
+
 Note: as a Linux kernel module this driver links against GPL-2.0-only kernel
 symbols; `MODULE_LICENSE("GPL")` reflects the kernel-facing license. The
 project source itself is provided under GPL-3.0 at the author's discretion.

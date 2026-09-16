@@ -117,3 +117,8 @@ echo 1 | sudo tee /sys/bus/usb/drivers/brtusb/*/hid_switch
 ```
 
 本独立驱动适合不想重编整树、或需要保留 HID 切换私有功能的场景。
+
+## Community
+
+本项目的推广与测试在 [LINUX DO](https://linux.do) 社区进行,感谢佬友们
+的测试与反馈。💙
