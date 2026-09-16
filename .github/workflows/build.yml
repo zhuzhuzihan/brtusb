@@ -5,58 +5,100 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  # clang/LLVM as the complete toolchain (CC, LD, OBJCOPY, ...)
-  LLVM: 1
-
 jobs:
+  # Resolve the latest patch release of each target series from kernel.org,
+  # so the matrix follows current stable/longterm versions automatically.
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - name: Resolve kernel versions
+        id: gen
+        run: |
+          python3 - <<'EOF' > matrix.json
+          import json, urllib.request
+
+          SERIES = ["6.6", "6.12", "7.1", "7.2"]
+          TOOLCHAINS = ["gcc", "clang"]
+
+          data = json.load(urllib.request.urlopen(
+              "https://www.kernel.org/releases.json", timeout=30))
+          versions = {r["version"] for r in data["releases"]}
+
+          include = []
+          for series in SERIES:
+              hits = [v for v in versions if v.startswith(series + ".")]
+              if not hits:
+                  print("::warning::series %s not on kernel.org, skipped" % series)
+                  continue
+              ver = sorted(hits, key=lambda s: [int(x) for x in s.split(".")])[-1]
+              for tc in TOOLCHAINS:
+                  include.append({"kernel": ver, "toolchain": tc})
+
+          print(json.dumps({"include": include}))
+          EOF
+          cat matrix.json
+          echo "matrix=$(cat matrix.json | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
   build:
-    name: clang / linux-${{ matrix.kernel }}
+    name: ${{ matrix.toolchain }} / linux-${{ matrix.kernel }}
+    needs: resolve
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        # Longterm/stable series to validate API compatibility
-        kernel: ["6.1.148", "6.6.106", "6.12.47", "6.17.8"]
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM toolchain and kernel build deps
+      - name: Install toolchain and kernel build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld llvm bc bison flex libelf-dev libssl-dev dwarves cpio \
-            xz-utils curl
+            gcc-13 clang lld llvm bc bison flex libelf-dev libssl-dev \
+            dwarves cpio xz-utils curl
 
       - name: Cache kernel source
         uses: actions/cache@v4
         id: ksrc
         with:
           path: linux-${{ matrix.kernel }}
-          key: ksrc-${{ matrix.kernel }}-v2
+          key: ksrc-${{ matrix.kernel }}-v1
 
       - name: Download kernel source
         if: steps.ksrc.outputs.cache-hit != 'true'
         run: |
           KVER=${{ matrix.kernel }}
+          MAJOR=$(echo "$KVER" | cut -d. -f1)
+          # 7.x tarballs live under v7.x/, 6.x and older under v6.x/
           curl -fSL --retry 3 \
-            "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KVER}.tar.xz" \
+            "https://cdn.kernel.org/pub/linux/kernel/v${MAJOR}.x/linux-${KVER}.tar.xz" \
             -o /tmp/linux-${KVER}.tar.xz
           tar -xJf /tmp/linux-${KVER}.tar.xz
 
-      - name: Prepare kernel (defconfig + modules_prepare, clang)
+      - name: Prepare kernel (defconfig + modules_prepare, ${{ matrix.toolchain }})
         working-directory: linux-${{ matrix.kernel }}
         run: |
-          make LLVM=${LLVM} defconfig
-          make LLVM=${LLVM} -j"$(nproc)" modules_prepare
+          if [ "${{ matrix.toolchain }}" = "clang" ]; then
+            make LLVM=1 defconfig
+            make LLVM=1 -j"$(nproc)" modules_prepare
+          else
+            make CC=gcc-13 HOSTCC=gcc-13 defconfig
+            make CC=gcc-13 HOSTCC=gcc-13 -j"$(nproc)" modules_prepare
+          fi
 
-      - name: Build brtusb.ko (clang)
+      - name: Build brtusb.ko (${{ matrix.toolchain }})
         run: |
           # KBUILD_MODPOST_WARN: modules_prepare does not produce
           # Module.symvers, so unresolved kernel symbols are only warnings
           # here; resolution happens against the running kernel.
-          make LLVM=${LLVM} KBUILD_MODPOST_WARN=1 \
+          if [ "${{ matrix.toolchain }}" = "clang" ]; then
+            MAKEARGS="LLVM=1"
+          else
+            MAKEARGS="CC=gcc-13 HOSTCC=gcc-13"
+          fi
+          make $MAKEARGS KBUILD_MODPOST_WARN=1 \
                -C linux-${{ matrix.kernel }} \
                M="$GITHUB_WORKSPACE/linux" -j"$(nproc)" modules V=1
           file linux/brtusb.ko
@@ -65,8 +107,6 @@ jobs:
       - name: Upload module artifact
         uses: actions/upload-artifact@v4
         with:
-          name: brtusb-linux-${{ matrix.kernel }}
-          path: |
-            linux/brtusb.ko
-            linux/Module.symvers
+          name: brtusb-linux-${{ matrix.kernel }}-${{ matrix.toolchain }}
+          path: linux/brtusb.ko
           if-no-files-found: error
