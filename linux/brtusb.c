@@ -79,21 +79,12 @@
 #include <linux/version.h>
 
 /*
- * hci_dev->notify API history:
- *   <= 6.11 : void (*)(struct hci_dev *, unsigned int evt)
- *   6.12-6.17: void (*)(struct hci_dev *, unsigned int num_bands,
- *                      int air_mode)
- *   >= 7.0  : void (*)(struct hci_dev *, unsigned int evt)   (re-introduced)
- * HCI_QUIRK bitmap access:
- *   <= 6.17 : set_bit(HCI_QUIRK_*, &hdev->quirks)
- *   >= 7.0  : hci_set_quirk(hdev, HCI_QUIRK_*)
+ * hci_dev->notify is void (*)(struct hci_dev *, unsigned int evt) across
+ * all mainline kernels covered here (6.1 - 7.0).
+ * HCI_QUIRK bitmap access changed in 6.17:
+ *   <= 6.16 : set_bit(HCI_QUIRK_*, &hdev->quirks)
+ *   >= 6.17 : hci_set_quirk(hdev, HCI_QUIRK_*)
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) && \
-    LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
-#define BRTUSB_NOTIFY_BANDS	1
-#else
-#define BRTUSB_NOTIFY_BANDS	0
-#endif
 
 /* Framing: number of isochronous packets per SCO RX URB (same layout the
  * Windows driver uses when building the ISO read URBs) */
@@ -639,27 +630,9 @@ static void brtusb_isoc_work(struct work_struct *work)
 	}
 }
 
-#if BRTUSB_NOTIFY_BANDS
-/* 6.12 - 6.17: num_bands carries the active SCO stream count */
-static void brtusb_notify(struct hci_dev *hdev, unsigned int num_bands,
-			  int air_mode)
-{
-	struct brtusb_data *data = hci_get_drvdata(hdev);
-
-	BT_DBG("%s sco_num %u air_mode %d", hdev->name, num_bands, air_mode);
-
-	if (num_bands == data->sco_num && air_mode == data->air_mode)
-		return;
-
-	data->sco_num = num_bands;
-	data->air_mode = air_mode;
-
-	schedule_work(&data->isoc_work);
-}
-#else
-/* evt-based API (<= 6.11 and >= 7.0): derive the SCO count from the
- * connection hash, exactly like the old btusb_notify() and the
- * SELECT_INTERFACE logic of the Windows driver */
+/* evt-based notify API: derive the SCO count from the connection hash,
+ * exactly like the old btusb_notify() and the SELECT_INTERFACE logic of
+ * the Windows driver */
 static void brtusb_notify(struct hci_dev *hdev, unsigned int evt)
 {
 	struct brtusb_data *data = hci_get_drvdata(hdev);
@@ -676,7 +649,6 @@ static void brtusb_notify(struct hci_dev *hdev, unsigned int evt)
 
 	schedule_work(&data->isoc_work);
 }
-#endif
 
 /* ---------------------------------------------------------------------- */
 /* TX paths                                                                */
@@ -1048,7 +1020,7 @@ static int brtusb_probe(struct usb_interface *intf,
 
 	/* CSR BlueCore clones need the reset-on-close quirk: the Windows
 	 * stack always reinitialises the transport on close */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 	hci_set_quirk(hdev, HCI_QUIRK_RESET_ON_CLOSE);
 #else
 	set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);

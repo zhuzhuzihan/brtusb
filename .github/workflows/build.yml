@@ -53,7 +53,11 @@ jobs:
 
       - name: Build brtusb.ko (clang)
         run: |
-          make LLVM=${LLVM} -C linux-${{ matrix.kernel }} \
+          # KBUILD_MODPOST_WARN: modules_prepare does not produce
+          # Module.symvers, so unresolved kernel symbols are only warnings
+          # here; resolution happens against the running kernel.
+          make LLVM=${LLVM} KBUILD_MODPOST_WARN=1 \
+               -C linux-${{ matrix.kernel }} \
                M="$GITHUB_WORKSPACE/linux" -j"$(nproc)" modules V=1
           file linux/brtusb.ko
           modinfo linux/brtusb.ko || true
