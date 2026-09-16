@@ -62,6 +62,14 @@ Details, module parameters and the HID-mode switch usage are documented in
   HCI vendor commands; no vendor firmware is shipped in this repository.
 * See [LICENSE](LICENSE) (GPL-3.0) for the license of this code.
 
+## Acknowledgements
+
+Development was **AI-assisted**: static analysis (objdump/radare2 disassembly,
+function-level string mapping) was done manually, and an LLM was used to help
+reconstruct the pseudo-code, write the driver, and set up CI. All conclusions
+were cross-checked against the binary (URB function codes, control-transfer
+parameters, byte-level magic values).
+
 Note: as a Linux kernel module this driver links against GPL-2.0-only kernel
 symbols; `MODULE_LICENSE("GPL")` reflects the kernel-facing license. The
 project source itself is provided under GPL-3.0 at the author's discretion.
