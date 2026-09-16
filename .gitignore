@@ -1,0 +1,15 @@
+# Build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+*.d
+
+# Tooling
+.vscode/
+.idea/
+*.swp

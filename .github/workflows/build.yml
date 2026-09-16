@@ -1,0 +1,68 @@
+name: Build brtusb
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # clang/LLVM as the complete toolchain (CC, LD, OBJCOPY, ...)
+  LLVM: 1
+
+jobs:
+  build:
+    name: clang / linux-${{ matrix.kernel }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Longterm/stable series to validate API compatibility
+        kernel: ["6.1.148", "6.6.106", "6.12.47", "6.17.8"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM toolchain and kernel build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm bc bison flex libelf-dev libssl-dev dwarves cpio \
+            xz-utils curl
+
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        id: ksrc
+        with:
+          path: linux-${{ matrix.kernel }}
+          key: ksrc-${{ matrix.kernel }}-v2
+
+      - name: Download kernel source
+        if: steps.ksrc.outputs.cache-hit != 'true'
+        run: |
+          KVER=${{ matrix.kernel }}
+          curl -fSL --retry 3 \
+            "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KVER}.tar.xz" \
+            -o /tmp/linux-${KVER}.tar.xz
+          tar -xJf /tmp/linux-${KVER}.tar.xz
+
+      - name: Prepare kernel (defconfig + modules_prepare, clang)
+        working-directory: linux-${{ matrix.kernel }}
+        run: |
+          make LLVM=${LLVM} defconfig
+          make LLVM=${LLVM} -j"$(nproc)" modules_prepare
+
+      - name: Build brtusb.ko (clang)
+        run: |
+          make LLVM=${LLVM} -C linux-${{ matrix.kernel }} \
+               M="$GITHUB_WORKSPACE/linux" -j"$(nproc)" modules V=1
+          file linux/brtusb.ko
+          modinfo linux/brtusb.ko || true
+
+      - name: Upload module artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brtusb-linux-${{ matrix.kernel }}
+          path: |
+            linux/brtusb.ko
+            linux/Module.symvers
+          if-no-files-found: error
